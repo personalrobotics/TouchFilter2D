@@ -10,8 +10,14 @@ it also requires `nlopt` installed.
 Contains 3 experiments:
 
 * Simple Filter - a simple 3D environment with a point robot and a surface.
+    ![img](https://github.com/personalrobotics/TouchFilter2D/blob/master/simple_filter.png?raw=true)
+   WASD + Q/E can be used to move the robot around;
 * Analytic Filter (IK) - a 2-link 2-joint robot with a single point
+  ![img](https://github.com/personalrobotics/TouchFilter2D/blob/master/analytic_filter.png?raw=true)
+   Use the mouse to move the robot around.
 * Touch Filter - a 3-link 3-joint robot with a signed distance field based environment.
+  ![img](https://github.com/personalrobotics/TouchFilter2D/blob/master/sdf_filter.png?raw=true)
+   use the mouse to move the robot around
 
 Most of the experiments can be run in the following modes:
 
