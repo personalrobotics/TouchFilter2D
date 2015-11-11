@@ -18,6 +18,23 @@ class ofApp;
 class AnalyticFilter
 {
     public:
+
+        enum FilterMode
+        {
+            Mode_MPFAnalytic,
+            Mode_MPFParticleProjection,
+            Mode_MPFBallProjection,
+            Mode_MPFUniformProjection,
+            Mode_CPF
+        };
+
+        enum ExperimentMode
+        {
+            Experiment_UserControl,
+            Experiment_Dataset
+        };
+
+
         typedef arm_slam::Robot<2> Robot;
         typedef Robot::Config Config;
 
@@ -52,6 +69,8 @@ class AnalyticFilter
         void ResampleParticles();
         void MoveRobot(const Config& movement);
         float GetDist(const Config& config, const Contact& contact);
+        bool ProjectToManifold(const Config& q, Contact& c, Config& out);
+
         ofVec2f FK(int link, ofVec2f linkPoint, const Config& config);
         std::vector<Config> IK(int link, ofVec2f linkPoint, const ofVec2f& target);
         ofApp* app;
@@ -59,9 +78,14 @@ class AnalyticFilter
         Robot trueRobot;
         Config SampleSphere();
 
+        FilterMode filterMode;
+        ExperimentMode experimentMode;
+        int timestep;
+
         std::vector<Particle> particles;
         std::vector<ofVec2f> points;
         std::vector<Contact> contacts;
+        std::vector<Config> recordedTrajectory;
 };
 
 #endif /* ANALYTICFILTER_H_ */

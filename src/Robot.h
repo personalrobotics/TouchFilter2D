@@ -27,7 +27,7 @@ namespace arm_slam
             {
                 color = c;
 
-                for (size_t i = 0; i < N; i++)
+                for (size_t i = 0; i < N + 1; i++)
                 {
                     links[i]->color = c;
                 }
@@ -48,7 +48,7 @@ namespace arm_slam
                 }
 
                 std::vector<float> linkLengths;
-                for (size_t i = 0; i < N; i++)
+                for (size_t i = 0; i < N + 1; i++)
                 {
                     Link* link = other.links[i];
                     linkLengths.push_back(link->localTranslation.x);
@@ -146,7 +146,7 @@ namespace arm_slam
             Config ComputeJacobianTransposeMove(const ofVec2f& force)
             {
                 ofVec2f ee = GetEEPos();
-                LinearJacobian jc =ComputeLinearJacobian(ee);
+                LinearJacobian jc = ComputeLinearJacobian(ee);
                 return jc.Transpose() * MatFromVec2(force);
             }
 
@@ -155,7 +155,9 @@ namespace arm_slam
                 LinearJacobian jacobian;
                 ofVec3f zi = ofVec3f(0, 0, 1);
                 ofVec3f on = ofVec3f(globalPos.x, globalPos.y, 0);
-                for(size_t i = 0; i < linkIDX; i++)
+                int jointIDX = linkIDX;
+                if (jointIDX > N) jointIDX = N;
+                for(size_t i = 0; i < jointIDX; i++)
                 {
                     Joint* joint = joints[i];
                     ofVec3f oi = ofVec3f(joint->globalTranslation.x, joint->globalTranslation.y, 0);

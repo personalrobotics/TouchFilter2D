@@ -487,7 +487,6 @@ namespace arm_slam
     // Sequential importance resampling + fuzz
     void TouchFilter::ResampleParticles()
     {
-
         float ballSize = 0.0005;
         std::vector<Config> offsets;
 
