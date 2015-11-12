@@ -12,6 +12,7 @@
 #include "BasicMat.h"
 #include "Robot.h"
 #include "Common.h"
+#include <fstream>
 
 class ofApp;
 
@@ -71,6 +72,9 @@ class AnalyticFilter
         float GetDist(const Config& config, const Contact& contact);
         bool ProjectToManifold(const Config& q, Contact& c, Config& out);
 
+
+        void LoadTrajectory(const std::string& fileName);
+
         ofVec2f FK(int link, ofVec2f linkPoint, const Config& config);
         std::vector<Config> IK(int link, ofVec2f linkPoint, const ofVec2f& target);
         ofApp* app;
@@ -81,6 +85,10 @@ class AnalyticFilter
         FilterMode filterMode;
         ExperimentMode experimentMode;
         int timestep;
+        bool recordData;
+        bool recordTrajectory;
+        std::fstream dataFile;
+        std::fstream trajFile;
 
         std::vector<Particle> particles;
         std::vector<ofVec2f> points;

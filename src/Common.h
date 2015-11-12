@@ -32,9 +32,9 @@ inline float TorusDist(ofVec2f a, ofVec2f b)
     float x2 = b.x;
     float y1 = a.y;
     float y2 = b.y;
-    float w = pi;
-    float h = pi;
-    return sqrt(pow(fmin(fabs(x1 - x2), w - fabs(x1 - x2)), 2) + pow(fmin(fabs(y1 - y2), h - fabs(y1-y2)), 2));
+    float w = 2 * pi;
+    float h = 2 * pi;
+    return sqrt(pow(fmin(fabs(x1 - x2), w - fabs(x1 - x2)), 2) + pow(fmin(fabs(y1 - y2), h - fabs(y1 - y2)), 2));
 }
 
 inline ofVec3f SampleBall()

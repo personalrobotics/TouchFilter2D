@@ -11,14 +11,16 @@
 AnalyticFilter::AnalyticFilter()
 {
     timestep = 0;
-    experimentMode = Experiment_UserControl;
-    filterMode = Mode_MPFAnalytic;
+    experimentMode = Experiment_Dataset;
+    filterMode = Mode_MPFBallProjection;
     linkLengths = new float[3];
     linkLengths[0] = 100;
     linkLengths[1] = 50;
     linkLengths[2] = 1;
     trueRobot.Initialize(linkLengths);
     trueRobot.SetColor(ofColor(0));
+    recordData = true;
+    recordTrajectory = false;
 
     float x = SCREEN_WIDTH /2;
     float y = SCREEN_HEIGHT /2;
@@ -36,8 +38,15 @@ AnalyticFilter::AnalyticFilter()
     //    points.push_back(ofVec2f(dx, dy));
    // }
 
+    if (experimentMode == Experiment_Dataset)
+    {
+        LoadTrajectory("./trajectory.txt");
+        trueRobot.SetQ(recordedTrajectory[0]);
+    }
+
+
     int numParticles = 1000;
-    float fuzz = 2.0f;
+    float fuzz = 3.0f;
     for (int i = 0; i < numParticles; i++)
     {
         Particle p;
@@ -45,17 +54,32 @@ AnalyticFilter::AnalyticFilter()
         p.robot->Initialize(linkLengths);
         p.robot->CloneFrom(trueRobot);
         p.robot->SetColor(ofColor(100, 100, 255, 10));
-        p.robot->SetQ(SampleSphere() * fuzz);
+        p.robot->SetQ(trueRobot.GetQ() + SampleSphere() * fuzz);
         p.weight = 1.0f;
         particles.push_back(p);
     }
 
+    if (recordData)
+    {
+        dataFile.open("./errors.txt", ios_base::out | ios_base::trunc);
+    }
+
+    if (recordTrajectory)
+    {
+        trajFile.open("./trajectory.txt", ios_base::in | ios_base::out | ios_base::trunc);
+        if (trajFile.fail())
+        {
+            cerr << "open failure: " << strerror(errno) << '\n';
+            exit(-1);
+         }
+    }
 
 }
 
 AnalyticFilter::~AnalyticFilter()
 {
-    // TODO Auto-generated destructor stub
+   dataFile.close();
+   trajFile.close();
 }
 
 AnalyticFilter::Config AnalyticFilter::SampleSphere()
@@ -81,7 +105,6 @@ void AnalyticFilter::Update()
                 ofVec2f ee = trueRobot.GetEEPos() * 2;
                 ofVec2f force = ee - ofVec2f(app->mouseX, app->mouseY);
 
-
                 Robot::Config vel = trueRobot.ComputeJacobianTransposeMove(force);
 
                 if (!(isinf(vel[0]) || isinf(vel[1])) && (fabs(vel[0]) + fabs(vel[1])) < 100000)
@@ -91,21 +114,41 @@ void AnalyticFilter::Update()
             }
             break;
         }
+
         case Experiment_Dataset:
         {
             size_t idx = timestep;
             if (idx < recordedTrajectory.size())
             {
                 Config q = recordedTrajectory[idx];
+                Config curr = trueRobot.GetQ();
+
                 trueRobot.Update();
-                Config zero;
-                zero[0] = 0;
-                zero[1] = 0;
-                MoveRobot(zero);
+
+                MoveRobot(q - curr);
             }
             break;
         }
     }
+}
+
+void AnalyticFilter::LoadTrajectory(const std::string& fileName)
+{
+    std::ifstream trajFileIn;
+    trajFileIn.open(fileName.c_str());
+    recordedTrajectory.clear();
+    while (trajFileIn.good())
+    {
+        float q0, q1;
+        trajFileIn >> q0;
+        trajFileIn >> q1;
+        Config q;
+        q[0] = q0;
+        q[1] = q1;
+        recordedTrajectory.push_back(q);
+    }
+    printf("Traj has %lu configs\n", recordedTrajectory.size());
+    trajFileIn.close();
 }
 
 void AnalyticFilter::ResolveContacts()
@@ -424,7 +467,7 @@ float AnalyticFilter::GetKernelDensity(const Config& q)
     {
         const Config& qi = particles.at(i).robot->GetQ();
         ofVec2f pi(qi(0), qi(1));
-        density += exp(-10 * TorusDist(pi, qp)) / particles.size();
+        density += exp(-250 * TorusDist(pi, qp)) / particles.size();
     }
 
     return density;
@@ -432,20 +475,45 @@ float AnalyticFilter::GetKernelDensity(const Config& q)
 
 void AnalyticFilter::MoveRobot(const Config& movement)
 {
-    printf("%f %f\n", movement[0], movement[1]);
+
     float pi = 3.14159;
     trueRobot.SetQ(trueRobot.GetQ() + movement);
     trueRobot.Update();
+    Config q = trueRobot.GetQ();
+
+    if (recordTrajectory)
+    {
+        trajFile << q[0] << " " << q[1];
+        printf("%f %f\n", movement[0], movement[1]);
+    }
 
     for (size_t i = 0; i < particles.size(); i++)
     {
-        Config qnew = particles.at(i).robot->GetQ() + movement + SampleSphere() * 0.001;
+        Config qnew = particles.at(i).robot->GetQ() + movement + SampleSphere() * 0.005;
         qnew(0) = wrap(qnew(0), -pi, pi);
         qnew(1) = wrap(qnew(1), -pi, pi);
         particles.at(i).robot->SetQ(qnew);
         particles.at(i).robot->Update();
     }
     ResolveContacts();
+
+    if (recordData)
+    {
+        ofVec2f qReal(q[0], q[1]);
+        for (size_t i = 0; i < particles.size(); i++)
+        {
+            Config qi = particles.at(i).robot->GetQ();
+            ofVec2f veci(qi[0], qi[1]);
+            float error = TorusDist(qReal, veci);
+            dataFile << error;
+
+            if (i < particles.size() - 1)
+            {
+                dataFile << " ";
+            }
+        }
+        dataFile << std::endl;
+    }
 }
 
 float AnalyticFilter::GetDist(const Config& config, const Contact& contact)
