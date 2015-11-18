@@ -22,12 +22,38 @@ class AnalyticFilter
 
         enum FilterMode
         {
-            Mode_MPFAnalytic,
-            Mode_MPFParticleProjection,
-            Mode_MPFBallProjection,
-            Mode_MPFUniformProjection,
-            Mode_CPF
+            Mode_MPFAnalytic = 0,
+            Mode_MPFParticleProjection = 1,
+            Mode_MPFBallProjection = 2,
+            Mode_MPFUniformProjection = 3,
+            Mode_CPF = 4
         };
+
+        const char* ToString(FilterMode mode)
+        {
+            switch(mode)
+            {
+                case Mode_MPFAnalytic:
+                    return "mpf_analytic";
+                    break;
+                case Mode_MPFBallProjection:
+                    return "mpf_ball";
+                    break;
+                case Mode_MPFUniformProjection:
+                    return "mpf_uniform";
+                    break;
+                case Mode_CPF:
+                    return "cpf";
+                    break;
+                case Mode_MPFParticleProjection:
+                    return "mpf_particle";
+                    break;
+                default:
+                    return "?";
+                    break;
+            }
+            return "?";
+        }
 
         enum ExperimentMode
         {

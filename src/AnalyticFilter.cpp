@@ -8,11 +8,13 @@
 #include "AnalyticFilter.h"
 #include "Definitions.h"
 
+#include <sstream>
+
 AnalyticFilter::AnalyticFilter()
 {
     timestep = 0;
     experimentMode = Experiment_Dataset;
-    filterMode = Mode_MPFBallProjection;
+    filterMode = Mode_MPFAnalytic;
     linkLengths = new float[3];
     linkLengths[0] = 100;
     linkLengths[1] = 50;
@@ -29,6 +31,7 @@ AnalyticFilter::AnalyticFilter()
     Config zero;
     zero[0] = 0;
     zero[1] = 0;
+    ofSeedRandom(0);
     trueRobot.SetQ(zero);
     trueRobot.Update();
     points.push_back(ofVec2f(x + 100, y - 50));
@@ -45,8 +48,8 @@ AnalyticFilter::AnalyticFilter()
     }
 
 
-    int numParticles = 1000;
-    float fuzz = 3.0f;
+    int numParticles = 350;
+    float fuzz = 2.8f;
     for (int i = 0; i < numParticles; i++)
     {
         Particle p;
@@ -61,7 +64,9 @@ AnalyticFilter::AnalyticFilter()
 
     if (recordData)
     {
-        dataFile.open("./errors.txt", ios_base::out | ios_base::trunc);
+        std::stringstream ss;
+        ss << "./error_" << ToString(filterMode) << ".txt";
+        dataFile.open(ss.str().c_str(), ios_base::out | ios_base::trunc);
     }
 
     if (recordTrajectory)
@@ -467,7 +472,7 @@ float AnalyticFilter::GetKernelDensity(const Config& q)
     {
         const Config& qi = particles.at(i).robot->GetQ();
         ofVec2f pi(qi(0), qi(1));
-        density += exp(-250 * TorusDist(pi, qp)) / particles.size();
+        density += exp(-27.57 * TorusDist(pi, qp)) / particles.size();
     }
 
     return density;

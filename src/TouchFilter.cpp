@@ -35,8 +35,8 @@ namespace arm_slam
         for (size_t i = 0; i < filter->contacts.size(); i++)
         {
             TouchFilter::Contact& contact = filter->contacts.at(i);
-            Link* link = particle->links[contact.link];
-            Link* nextLink = particle->links[contact.link + 1];
+            Link* link = particle->links[contact.joint];
+            Link* nextLink = particle->links[contact.joint + 1];
             ofVec2f p = link->globalTranslation;
             ofVec2f dir = nextLink->globalTranslation - link->globalTranslation;
             ofVec2f bodyPoint = contact.offset * dir + p;
@@ -50,7 +50,7 @@ namespace arm_slam
             }
             g *= d;
             cost += pow(d, 2);
-            TouchFilter::Robot::LinearJacobian J = particle->ComputeLinearJacobian(bodyPoint, contact.link + 1);
+            TouchFilter::Robot::LinearJacobian J = particle->ComputeLinearJacobian(bodyPoint, contact.joint + 1);
             grad += J.Transpose() * particle->MatFromVec2(g);
         }
 
@@ -70,11 +70,23 @@ namespace arm_slam
     TouchFilter::TouchFilter() :
             app(0x0)
     {
+        ofSeedRandom(0);
+        kernelDensity = 8;
+        timestep = 0;
+        filterMode = TouchFilter::Mode_MPFBallProjection;
+        experimentMode = TouchFilter::Experiment_Dataset;
+        recordData = true;
+        recordTrajectory = false;
+        ballSize = 0.05;
+        motionDrift = 0.01;
+        size_t numParticles = 250;
+        float initialError = 0.8f;
+
         world.data.loadImage("demo.png");
         world.distdata.loadImage("demo_dist.png");
         gradientImg.loadImage("jet.png");
         world.Initialize();
-        float linkLengths[] = {100.0f, 80.0f, 50.0f};
+        float linkLengths[] = {100.0f, 80.0f, 50.0f, 1.0f};
         groundTruthRobot.color = ofColor(200, 10, 10);
         groundTruthRobot.Initialize(linkLengths);
         Config c;
@@ -87,7 +99,7 @@ namespace arm_slam
         noisyRobot.CloneFrom(groundTruthRobot);
         noisyRobot.SetColor(ofColor(10, 200, 10));
 
-        for (size_t i = 0; i < 100; i++)
+        for (size_t i = 0; i < numParticles; i++)
         {
             Particle particle;
             particle.robot = new Robot();
@@ -102,18 +114,58 @@ namespace arm_slam
         for (size_t i = 0; i < particles.size(); i++)
         {
             Config& offset = particles.at(i).offset;
-            ofVec3f sample = SampleBall() * 0.8f;
+            ofVec3f sample = SampleBall() * initialError;
             offset[0] += sample.x;
             offset[1] += sample.y;
             offset[2] += sample.z;
         }
         cam.setDistance(3);
         mouseDown = false;
+
+        if (recordTrajectory)
+        {
+            trajFile.open("traj_tsdf.txt", ios::out | ios::trunc);
+        }
+
+        if (recordData)
+        {
+            std::stringstream ss;
+            ss << "error_tsdf_" << ToString(filterMode) << ".txt";
+            dataFile.open(ss.str().c_str(), ios::out | ios::trunc);
+        }
+
+        if (experimentMode == Experiment_Dataset)
+        {
+            LoadTrajectory("traj_tsdf.txt");
+        }
+    }
+
+
+    void TouchFilter::LoadTrajectory(const std::string& fileName)
+    {
+        std::ifstream trajFileIn;
+        trajFileIn.open(fileName.c_str());
+        recordedTrajectory.clear();
+        while (trajFileIn.good())
+        {
+            float q0, q1, q2;
+            trajFileIn >> q0;
+            trajFileIn >> q1;
+            trajFileIn >> q2;
+            Config q;
+            q[0] = q0;
+            q[1] = q1;
+            q[2] = q2;
+            recordedTrajectory.push_back(q);
+        }
+        printf("Traj has %lu configs\n", recordedTrajectory.size());
+        trajFileIn.close();
     }
 
     TouchFilter::~TouchFilter()
     {
-
+        trajFile.close();
+        dataFile.close();
     }
 
     void TouchFilter::Update()
@@ -128,7 +180,7 @@ namespace arm_slam
 
         Config curr = groundTruthRobot.GetQ();
 
-        if((app->mouseX > 0 && app->mouseY > 0) && !mouseDown)
+        if(experimentMode == Experiment_UserControl && ((app->mouseX > 0 && app->mouseY > 0) && !mouseDown))
         {
             ofVec2f ee = groundTruthRobot.GetEEPos() * 2;
             ofVec2f force = ee - ofVec2f(app->mouseX, app->mouseY);
@@ -142,25 +194,79 @@ namespace arm_slam
             Robot::Config vel = groundTruthRobot.ComputeJacobianTransposeMove(force);
             groundTruthRobot.SetQ(curr + vel * 1e-5);
             groundTruthRobot.Update();
-
-            if (CollisionCheck(groundTruthRobot, world))
+            noisyRobot.SetQ(groundTruthRobot.GetQ() + GetJointNoise(groundTruthRobot.GetQ()));
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                ResolveCollision(groundTruthRobot, world);
-                //ResampleManifold();
-                ResolveContacts();
+                particles.at(i).robot->SetQ(noisyRobot.GetQ() + particles.at(i).offset);
+                particles.at(i).robot->Update();
             }
-            else
+
+        }
+        else if (experimentMode == Experiment_Dataset)
+        {
+            groundTruthRobot.SetQ(recordedTrajectory.at(timestep));
+            groundTruthRobot.Update();
+            noisyRobot.SetQ(groundTruthRobot.GetQ() + GetJointNoise(groundTruthRobot.GetQ()));
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                WeightParticles();
-                ResampleParticles();
+                particles.at(i).robot->SetQ(noisyRobot.GetQ() + particles.at(i).offset);
+                particles.at(i).robot->Update();
+            }
+
+            timestep++;
+
+            if (timestep >= recordedTrajectory.size())
+            {
+                exit(0);
             }
         }
 
-        noisyRobot.SetQ(groundTruthRobot.GetQ() + GetJointNoise(groundTruthRobot.GetQ()));
 
-        for (size_t i = 0; i < 100; i++)
+        if (CollisionCheck(groundTruthRobot, world))
         {
+            ResolveCollision(groundTruthRobot, world);
+            ResampleManifold();
+            //ResolveContacts();
+        }
+        else
+        {
+            WeightParticles();
+            ResampleParticles();
+        }
+
+        for (size_t i = 0; i < particles.size(); i++)
+        {
+            ofVec3f ballSample = SampleBall() * motionDrift;
+            Config noise;
+            noise[0] = ballSample.x;
+            noise[1] = ballSample.y;
+            noise[2] = ballSample.z;
+            particles.at(i).offset += noise;
             particles.at(i).robot->SetQ(noisyRobot.GetQ() + particles.at(i).offset);
+        }
+
+        if (recordTrajectory)
+        {
+            Config q = groundTruthRobot.GetQ();
+            trajFile << q[0] << " " << q[1] << " " << q[2] << " ";
+        }
+
+        if (recordData)
+        {
+            Config q = groundTruthRobot.GetQ();
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                Config diff = q - (particles.at(i).offset + noisyRobot.GetQ());
+                Mat1x1 difflen = diff.Transpose() * diff;
+                float dist = sqrt(difflen[0]);
+                dataFile << dist;
+
+                if (i < particles.size() - 1)
+                {
+                    dataFile << " ";
+                }
+            }
+            dataFile << std::endl;
         }
 
     }
@@ -249,9 +355,9 @@ namespace arm_slam
         //perturbation[0] = 0.25f * (ofNoise((float)curr(0), (float)curr(1), (float)curr(2) + 0.5f) - 0.5f);
         //perturbation[1] = 0.25f * (ofNoise((float)curr(0), (float)curr(1) + 0.5f, (float)curr(2)) - 0.5f);
         //perturbation[2] = 0.25f * (ofNoise((float)curr(0) + 0.5f, (float)curr(1), (float)curr(2)) - 0.5f);
-        perturbation[0] = 0.1f;
-        perturbation[1] = -0.05f;
-        perturbation[2] = 0.2f;
+        perturbation[0] = 0.0f;
+        perturbation[1] = -0.0f;
+        perturbation[2] = 0.0f;
         return perturbation;
     }
 
@@ -268,6 +374,20 @@ namespace arm_slam
         {
             particles.at(i).robot->Draw();
         }
+
+        /*
+        ofSetLineWidth(1.0);
+        ofSetColor(255, 0, 0);
+        for (int x = 1; x < world.distdata.width - 1; x+=10)
+        {
+            for (int y = 1; y < world.distdata.height - 1; y+=10)
+            {
+                ofVec2f grad = world.GetGradient(x, y);
+                grad.normalize();
+                ofLine(ofVec2f(x, y), ofVec2f(x, y) + grad * 5);
+            }
+        }
+        */
 
 
         ofSetColor(255, 0, 0);
@@ -286,13 +406,12 @@ namespace arm_slam
     float TouchFilter::GetKernelDensity(const Config& q)
     {
         float density = 0;
+        ofVec3f qvec(q[0], q[1], q[2]);
         for (size_t i = 0; i < particles.size(); i++)
         {
             const Config& qi = particles.at(i).offset;
-            Config diff = qi + q * -1.0f;
-            BasicMat<1, 1> diffLen = diff.Transpose() * diff;
-
-            density += exp(-1 * sqrt(diffLen[0]));
+            ofVec3f qivec(qi[0], qi[1], qi[2]);
+            density += exp(-kernelDensity * TorusDist(qvec, qivec));
         }
         return density;
     }
@@ -337,64 +456,183 @@ namespace arm_slam
         }
     }
 
-    // Resamples in a box around the current
-    // distribution and then projects all the samples
-    // to the manifold
-    void TouchFilter::ResampleManifold()
+    void TouchFilter:: WeightParticlesContact()
     {
-        Config minQ;
-        minQ[0] = 9999;
-        minQ[1] = 9999;
-        minQ[2] = 9999;
-
-        Config maxQ;
-        maxQ[0] = -9999;
-        maxQ[1] = -9999;
-        maxQ[2] = -9999;
-
-        for (size_t p = 0; p < particles.size(); p++)
-        {
-            const Config& qi = particles.at(p).offset;
-
-            minQ[0] = fmin(qi[0], minQ[0]);
-            minQ[1] = fmin(qi[1], minQ[1]);
-            minQ[2] = fmin(qi[2], minQ[2]);
-
-            maxQ[0] = fmax(qi[0], maxQ[0]);
-            maxQ[1] = fmax(qi[1], maxQ[1]);
-            maxQ[2] = fmax(qi[2], maxQ[2]);
-
-        }
-
-        float ballSize = 0.05;
-        std::vector<Config> newParticles;
-        for (size_t p = 0; p < particles.size(); p++)
-        {
-            Config sample;
-            sample[0] = ofRandom(minQ[0] - ballSize, maxQ[0] + ballSize);
-            sample[1] = ofRandom(minQ[1] - ballSize, maxQ[1] + ballSize);
-            sample[1] = ofRandom(minQ[2] - ballSize, maxQ[2] + ballSize);
-
-            newParticles.push_back(ProjectNLOPT(sample));
-        }
-
         float sumWeights = 0;
+        float cpf_weight = 0.1;
         for (size_t p = 0; p < particles.size(); p++)
         {
+            float cost = 0.0f;
             Particle& particle = particles.at(p);
-            particle.weight = GetKernelDensity(newParticles[p]);
+            //for (size_t i = 0; i < 3; i++)
+            for (size_t c = 0; c < contacts.size(); c++)
+            {
+                const Contact& contact = contacts.at(c);
+                Link* link = particle.robot->links[contact.joint];
+                Link* nextLink = particle.robot->links[contact.joint + 1];
+
+                ofVec2f p = link->globalTranslation;
+                ofVec2f dir = nextLink->globalTranslation - link->globalTranslation;
+
+                ofVec2f bodyPoint = contact.offset * dir + p;
+                cost += pow(world.GetDist((int)bodyPoint.x, (int)bodyPoint.y), 2);
+            }
+
+            particle.weight = exp(-cpf_weight * cost);
             sumWeights += particle.weight;
         }
 
         for (size_t p = 0; p < particles.size(); p++)
         {
-            Particle& particle = particles.at(p);
-            particle.offset = newParticles[p];
-            particle.weight /= sumWeights;
+            particles.at(p).weight /= sumWeights;
+        }
+    }
+
+    // Resamples from the contact manifold
+    void TouchFilter::ResampleManifold()
+    {
+        Config curr = noisyRobot.GetQ();
+        switch (filterMode)
+        {
+            case (Mode_MPFUniformProjection) :
+            {
+                std::vector<Config> newParticles;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Config sample;
+                    Config out;
+                    bool success = false;
+                    do
+                    {
+                        sample[0] = ofRandom(-M_PI * 0.5, M_PI * 0.5);
+                        sample[1] = ofRandom(-M_PI * 0.5, M_PI * 0.5);
+                        sample[2] = ofRandom(-M_PI * 0.5, M_PI * 0.5);
+                        success = Project(sample + curr, out);
+                    } while (!success);
+
+                    newParticles.push_back(out);
+                }
+
+                float sumWeights = 0;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.weight = GetKernelDensity(newParticles[p] - curr);
+                    sumWeights += particle.weight;
+                }
+
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.offset = newParticles[p] - curr;
+                    particle.weight /= sumWeights;
+                }
+
+                ResampleParticles();
+                break;
+            }
+            case (Mode_MPFParticleProjection):
+            {
+                std::vector<Config> newParticles;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    newParticles.push_back(Project(particles.at(p).offset + curr));
+                }
+
+                float sumWeights = 0;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.weight = GetKernelDensity(newParticles[p] - curr);
+                    sumWeights += particle.weight;
+                }
+
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.offset = newParticles[p] - curr;
+                    particle.weight /= sumWeights;
+                }
+
+                ResampleParticles();
+                break;
+            }
+            case (Mode_MPFBallProjection):
+            {
+                std::vector<Config> newParticles;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Config s = SampleBallUnion(ballSize);
+                    newParticles.push_back(Project(s + curr));
+                }
+
+                float sumWeights = 0;
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.weight = GetKernelDensity(newParticles[p] - curr);
+                    sumWeights += particle.weight;
+                }
+
+                for (size_t p = 0; p < particles.size(); p++)
+                {
+                    Particle& particle = particles.at(p);
+                    particle.offset = newParticles[p] - curr;
+                    particle.weight /= sumWeights;
+                }
+
+                ResampleParticles();
+                break;
+            }
+            case (Mode_CPF):
+            {
+                WeightParticlesContact();
+                ResampleParticles();
+                break;
+            }
+        }
+        contacts.clear();
+
+    }
+
+    TouchFilter::Config TouchFilter::SampleBallUnion(float radius)
+    {
+        TouchFilter::Config minConfig;
+        minConfig[0] = HUGE_VAL;
+        minConfig[1] = HUGE_VAL;
+        minConfig[2] = HUGE_VAL;
+        TouchFilter::Config maxConfig;
+        maxConfig[0] = -HUGE_VAL;
+        maxConfig[1] = -HUGE_VAL;
+        maxConfig[2] = -HUGE_VAL;
+        for (size_t i = 0; i < particles.size(); i++)
+        {
+            const Particle& p = particles.at(i);
+            for (int k = 0; k < 3; k++)
+            {
+                minConfig[k] = fmin(minConfig[k], p.offset[k]);
+                maxConfig[k] = fmax(maxConfig[k], p.offset[k]);
+            }
         }
 
-        ResampleParticles();
+        TouchFilter::Config sample;
+        float dist = HUGE_VAL;
+        do
+        {
+            for (int k = 0; k < 3; k++)
+                sample[k] = ofRandom(minConfig[k] - radius, maxConfig[k] + radius);
 
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                const Particle& p = particles.at(i);
+                dist = TorusDist(ofVec3f(sample[0], sample[1], sample[2]), ofVec3f(p.offset[0], p.offset[1], p.offset[2]));
+
+                if (dist < radius) return sample;
+            }
+
+        }
+        while(dist > radius);
+        return sample;
     }
 
     // Returns whether the robot collides with the world.
@@ -425,48 +663,66 @@ namespace arm_slam
         return false;
     }
 
-    // Projects to the manifold using the jacobian transpose.
-    TouchFilter::Config TouchFilter::Project(const Config& q)
+    bool TouchFilter::Project(const Config& q, Config& out)
     {
         Robot* particle = particles[0].robot;
         Config origOffset = particles[0].offset;
 
-        particle->SetQ(noisyRobot.GetQ() + q);
+        particle->SetQ(q);
         particle->Update();
         TouchFilter::Config toReturn = q;
 
-        for (int iter = 0; iter < 10; iter++)
+
+        float mult = -1e-5 / contacts.size();
+        bool anyError = false;
+        for (int iter = 0; iter < 100; iter++)
         {
-            Robot::Config grad;
-            for (size_t i = 0; i < contacts.size(); i++)
-            {
-                Contact& contact = contacts.at(i);
-                Link* link = particle->links[contact.link];
-                Link* nextLink = particle->links[contact.link + 1];
-                ofVec2f p = link->globalTranslation;
-                ofVec2f dir = nextLink->globalTranslation - link->globalTranslation;
-                ofVec2f bodyPoint = contact.offset * dir + p;
+          anyError = false;
+          Robot::Config grad;
+          for (size_t i = 0; i < contacts.size(); i++)
+          {
+              Contact& contact = contacts.at(i);
 
-                ofVec2f g = world.GetGradient((int)bodyPoint.x, (int)bodyPoint.y);
-                float d = world.GetDist((int)bodyPoint.x, (int)bodyPoint.y);
+              Link* link = particle->links[contact.joint];
+              Link* nextLink = particle->links[contact.joint + 1];
+              ofVec2f p = link->globalTranslation;
+              ofVec2f dir = nextLink->globalTranslation - link->globalTranslation;
+              ofVec2f bodyPoint = contact.offset * dir + p;
 
-                if (d > 0)
-                {
-                    d*= -1;
-                }
-                g *= d;
-                Robot::LinearJacobian J = particle->ComputeLinearJacobian(bodyPoint, contact.link + 1);
-                grad += J.Transpose() * particle->MatFromVec2(g);
-            }
+              ofVec2f g = world.GetGradient((int)bodyPoint.x, (int)bodyPoint.y);
+              float d = world.GetDist((int)bodyPoint.x, (int)bodyPoint.y);
 
-            toReturn += grad * -5e-10;
-            particle->SetQ(noisyRobot.GetQ() + toReturn);
-            particle->Update();
+              if (fabs(d) > 1.5)
+              {
+                  Robot::LinearJacobian J = particle->ComputeLinearJacobian(bodyPoint, contact.joint);
+                  grad += d * J.Transpose() * particle->MatFromVec2(g);
+                  anyError = true;
+              }
+              else
+              {
+                  break;
+              }
+          }
+          toReturn -= (grad * mult);
+          particle->SetQ(toReturn);
+          particle->Update();
+          if (!anyError)
+          {
+              break;
+          }
         }
 
         particle->SetQ(noisyRobot.GetQ() + origOffset);
-        return toReturn;
+        out = toReturn;
+        return !anyError;
+    }
 
+    // Projects to the manifold using the jacobian transpose.
+    TouchFilter::Config TouchFilter::Project(const Config& q)
+    {
+        TouchFilter::Config toReturn = q;
+        Project(q, toReturn);
+        return toReturn;
     }
 
     // This one just projects the current distribution
@@ -487,7 +743,6 @@ namespace arm_slam
     // Sequential importance resampling + fuzz
     void TouchFilter::ResampleParticles()
     {
-        float ballSize = 0.0005;
         std::vector<Config> offsets;
 
         for (size_t i = 0; i < particles.size(); i++)
@@ -509,10 +764,6 @@ namespace arm_slam
                 if (currT > t) { j = (int)k; break; }
             }
             particles.at(i).offset = offsets.at(j);
-            ofVec3f sample = SampleBall() * ballSize;
-            particles.at(i).offset[0] += sample.x;
-            particles.at(i).offset[1] += sample.y;
-            particles.at(i).offset[2] += sample.z;
             t += Minv;
         }
     }
@@ -573,17 +824,17 @@ namespace arm_slam
                     else if (world.Collides((int)bodyPoint.x, (int)bodyPoint.y))
                     {
                        ofVec2f g = world.GetGradient((int)bodyPoint.x, (int)bodyPoint.y);
-                       g *= fabs(world.GetDist((int)bodyPoint.x, (int)bodyPoint.y));
+                       g *= pow(world.GetDist((int)bodyPoint.x, (int)bodyPoint.y), 2);
 
                        Robot::LinearJacobian J = robot.ComputeLinearJacobian(bodyPoint, i + 1);
-                       grad += J.Transpose() * robot.MatFromVec2(g);
+                       grad -= J.Transpose() * robot.MatFromVec2(g);
 
                        if (k == 9)
                        {
                            gradPts.push_back(bodyPoint);
                            gradMag.push_back(g);
                            Contact contact;
-                           contact.link = i;
+                           contact.joint = i;
                            contact.offset = t;
                            contact.normal = g;
                            contacts.push_back(contact);

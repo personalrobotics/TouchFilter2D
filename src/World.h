@@ -40,14 +40,12 @@ namespace arm_slam
 
             ofVec2f GetGradient(int x, int y)
             {
-
-                float d0 = GetDist(x, y);
                 float dxplus = GetDist(x + 1, y);
                 float dyplus = GetDist(x, y + 1);
                 float dxminus = GetDist(x - 1, y);
                 float dyminus = GetDist(x, y - 1);
 
-                return ofVec2f((dxplus - dxminus) * 0.5f, (dyplus - dyminus) * 0.5f) * d0;
+                return ofVec2f((dxplus - dxminus) * 0.5f, (dyplus - dyminus) * 0.5f);
 
             }
 

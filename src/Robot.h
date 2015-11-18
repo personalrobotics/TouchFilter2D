@@ -156,8 +156,8 @@ namespace arm_slam
                 ofVec3f zi = ofVec3f(0, 0, 1);
                 ofVec3f on = ofVec3f(globalPos.x, globalPos.y, 0);
                 int jointIDX = linkIDX;
-                if (jointIDX > N) jointIDX = N;
-                for(size_t i = 0; i < jointIDX; i++)
+                if (jointIDX > N - 1) jointIDX = N - 1;
+                for(size_t i = 0; i < jointIDX + 1; i++)
                 {
                     Joint* joint = joints[i];
                     ofVec3f oi = ofVec3f(joint->globalTranslation.x, joint->globalTranslation.y, 0);

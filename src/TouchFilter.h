@@ -25,11 +25,48 @@ namespace arm_slam
 
             struct Contact
             {
-                int link;
+                int joint;
                 float offset;
                 ofVec2f normal;
             };
 
+
+            enum FilterMode
+            {
+                Mode_MPFParticleProjection = 1,
+                Mode_MPFBallProjection = 2,
+                Mode_MPFUniformProjection = 3,
+                Mode_CPF = 4
+            };
+
+            const char* ToString(FilterMode mode)
+            {
+                switch(mode)
+                {
+                    case Mode_MPFBallProjection:
+                        return "mpf_ball";
+                        break;
+                    case Mode_MPFUniformProjection:
+                        return "mpf_uniform";
+                        break;
+                    case Mode_CPF:
+                        return "cpf";
+                        break;
+                    case Mode_MPFParticleProjection:
+                        return "mpf_particle";
+                        break;
+                    default:
+                        return "?";
+                        break;
+                }
+                return "?";
+            }
+
+            enum ExperimentMode
+            {
+                Experiment_UserControl,
+                Experiment_Dataset
+            };
 
             typedef arm_slam::Robot<3> Robot;
             typedef Robot::Config Config;
@@ -56,13 +93,19 @@ namespace arm_slam
             void ResampleParticles();
 
             void WeightParticles();
+            void WeightParticlesContact();
             float GetKernelDensity(const Config& q);
 
             void ResampleManifold();
             Config Project(const Config& q);
+            bool Project(const Config& q, Config& out);
             Config ProjectNLOPT(const Config& q);
 
+            void LoadTrajectory(const std::string& fileName);
+
             void DrawPlot();
+
+            Config SampleBallUnion(float radius);
 
             World world;
             Robot groundTruthRobot;
@@ -75,6 +118,17 @@ namespace arm_slam
             std::vector<Contact> contacts;
             std::vector<Particle> particles;
             bool mouseDown;
+            std::vector<Config> recordedTrajectory;
+            bool recordData;
+            bool recordTrajectory;
+            std::fstream dataFile;
+            std::fstream trajFile;
+            FilterMode filterMode;
+            ExperimentMode experimentMode;
+            size_t timestep;
+            float kernelDensity;
+            float ballSize;
+            float motionDrift;
 
     };
 
