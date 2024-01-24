@@ -24,9 +24,9 @@ AnalyticFilter::AnalyticFilter()
     recordData = true;
     recordTrajectory = false;
 
-    float x = SCREEN_WIDTH /2;
-    float y = SCREEN_HEIGHT /2;
-    trueRobot.root->localTranslation.x =x;
+    float x = SCREEN_WIDTH / 2;
+    float y = SCREEN_HEIGHT / 2;
+    trueRobot.root->localTranslation.x = x;
     trueRobot.root->localTranslation.y = y;
     Config zero;
     zero[0] = 0;
@@ -35,18 +35,17 @@ AnalyticFilter::AnalyticFilter()
     trueRobot.SetQ(zero);
     trueRobot.Update();
     points.push_back(ofVec2f(x + 100, y - 50));
-    //for (int dx = 0; dx < SCREEN_WIDTH; dx+=10)
+    // for (int dx = 0; dx < SCREEN_WIDTH; dx+=10)
     //{
-    //    float dy = x + ofNoise(dx * 0.01) * 300 - 60;
-    //    points.push_back(ofVec2f(dx, dy));
-   // }
+    //     float dy = x + ofNoise(dx * 0.01) * 300 - 60;
+    //     points.push_back(ofVec2f(dx, dy));
+    // }
 
     if (experimentMode == Experiment_Dataset)
     {
         LoadTrajectory("./trajectory.txt");
         trueRobot.SetQ(recordedTrajectory[0]);
     }
-
 
     int numParticles = 350;
     float fuzz = 2.8f;
@@ -76,15 +75,14 @@ AnalyticFilter::AnalyticFilter()
         {
             cerr << "open failure: " << strerror(errno) << '\n';
             exit(-1);
-         }
+        }
     }
-
 }
 
 AnalyticFilter::~AnalyticFilter()
 {
-   dataFile.close();
-   trajFile.close();
+    dataFile.close();
+    trajFile.close();
 }
 
 AnalyticFilter::Config AnalyticFilter::SampleSphere()
@@ -102,42 +100,42 @@ void AnalyticFilter::Update()
     timestep++;
     switch (experimentMode)
     {
-        case Experiment_UserControl:
+    case Experiment_UserControl:
+    {
+        if ((app->mouseX > 0 && app->mouseY > 0))
         {
-            if((app->mouseX > 0 && app->mouseY > 0))
+            trueRobot.Update();
+            ofVec2f ee = trueRobot.GetEEPos() * 2;
+            ofVec2f force = ee - ofVec2f(app->mouseX, app->mouseY);
+
+            Robot::Config vel = trueRobot.ComputeJacobianTransposeMove(force);
+
+            if (!(isinf(vel[0]) || isinf(vel[1])) && (fabs(vel[0]) + fabs(vel[1])) < 100000)
             {
-                trueRobot.Update();
-                ofVec2f ee = trueRobot.GetEEPos() * 2;
-                ofVec2f force = ee - ofVec2f(app->mouseX, app->mouseY);
-
-                Robot::Config vel = trueRobot.ComputeJacobianTransposeMove(force);
-
-                if (!(isinf(vel[0]) || isinf(vel[1])) && (fabs(vel[0]) + fabs(vel[1])) < 100000)
-                {
-                    MoveRobot(vel * 1e-5);
-                }
+                MoveRobot(vel * 1e-5);
             }
-            break;
         }
+        break;
+    }
 
-        case Experiment_Dataset:
+    case Experiment_Dataset:
+    {
+        size_t idx = timestep;
+        if (idx < recordedTrajectory.size())
         {
-            size_t idx = timestep;
-            if (idx < recordedTrajectory.size())
-            {
-                Config q = recordedTrajectory[idx];
-                Config curr = trueRobot.GetQ();
+            Config q = recordedTrajectory[idx];
+            Config curr = trueRobot.GetQ();
 
-                trueRobot.Update();
+            trueRobot.Update();
 
-                MoveRobot(q - curr);
-            }
-            break;
+            MoveRobot(q - curr);
         }
+        break;
+    }
     }
 }
 
-void AnalyticFilter::LoadTrajectory(const std::string& fileName)
+void AnalyticFilter::LoadTrajectory(const std::string &fileName)
 {
     std::ifstream trajFileIn;
     trajFileIn.open(fileName.c_str());
@@ -162,10 +160,10 @@ void AnalyticFilter::ResolveContacts()
     {
         for (size_t l = 0; l < 2; l++)
         {
-           for (float t = 0; t < 1.0f; t += 0.05f)
-           {
-               ofVec2f localPoint(t, 0);
-               ofVec2f globalPoint = FK(l, localPoint, trueRobot.GetQ());
+            for (float t = 0; t < 1.0f; t += 0.05f)
+            {
+                ofVec2f localPoint(t, 0);
+                ofVec2f globalPoint = FK(l, localPoint, trueRobot.GetQ());
 
                 if (globalPoint.distance(points.at(i)) < 1.5f)
                 {
@@ -185,152 +183,152 @@ void AnalyticFilter::ResolveContacts()
         std::vector<Config> newParticles;
         std::vector<float> newWeights;
         float sum = 0;
-        switch(filterMode)
+        switch (filterMode)
         {
-            case (Mode_CPF):
+        case (Mode_CPF):
+        {
+            printf("CPF!\n");
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                printf("CPF!\n");
-                for (size_t i = 0; i < particles.size(); i++)
+                size_t c = (size_t)ofRandom(contacts.size());
+                float dist = GetDist(particles.at(i).robot->GetQ(), contacts.at(c));
+                newParticles.push_back(particles.at(i).robot->GetQ());
+                newWeights.push_back(exp(-0.1 * dist));
+                sum += newWeights.back();
+            }
+
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                particles.at(i).robot->SetQ(newParticles.at(i));
+                particles.at(i).weight = newWeights.at(i) / sum;
+            }
+
+            ResampleParticles();
+
+            break;
+        }
+        case (Mode_MPFAnalytic):
+        {
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                size_t c = (size_t)ofRandom(contacts.size());
+                size_t m = (size_t)ofRandom(contacts.at(c).manifold.size());
+                if (contacts.at(c).manifold.size() > 0)
                 {
-                    size_t c = (size_t)ofRandom(contacts.size());
-                    float dist = GetDist(particles.at(i).robot->GetQ(), contacts.at(c));
-                    newParticles.push_back(particles.at(i).robot->GetQ());
-                    newWeights.push_back(exp(-0.1 * dist));
+                    newParticles.push_back(contacts.at(c).manifold.at(m));
+                    newWeights.push_back(GetKernelDensity(contacts.at(c).manifold.at(m)));
                     sum += newWeights.back();
                 }
-
-                for (size_t i = 0; i < particles.size(); i++)
+                else
                 {
-                    particles.at(i).robot->SetQ(newParticles.at(i));
-                    particles.at(i).weight = newWeights.at(i) / sum;
+                    newParticles.push_back(particles.at(i).robot->GetQ());
+                    newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
+                    sum += newWeights.back();
                 }
-
-                ResampleParticles();
-
-                break;
             }
-            case (Mode_MPFAnalytic):
+
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                for (size_t i = 0; i < particles.size(); i++)
-                {
-                    size_t c = (size_t)ofRandom(contacts.size());
-                    size_t m = (size_t)ofRandom(contacts.at(c).manifold.size());
-                    if (contacts.at(c).manifold.size() > 0)
-                    {
-                        newParticles.push_back(contacts.at(c).manifold.at(m));
-                        newWeights.push_back(GetKernelDensity(contacts.at(c).manifold.at(m)));
-                        sum += newWeights.back();
-                    }
-                    else
-                    {
-                        newParticles.push_back(particles.at(i).robot->GetQ());
-                        newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
-                        sum += newWeights.back();
-                    }
-                }
-
-                for (size_t i = 0; i < particles.size(); i++)
-                {
-                    particles.at(i).robot->SetQ(newParticles.at(i));
-                    particles.at(i).weight = newWeights.at(i) / sum;
-                }
-
-                ResampleParticles();
-                break;
+                particles.at(i).robot->SetQ(newParticles.at(i));
+                particles.at(i).weight = newWeights.at(i) / sum;
             }
-            case (Mode_MPFBallProjection):
+
+            ResampleParticles();
+            break;
+        }
+        case (Mode_MPFBallProjection):
+        {
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                for (size_t i = 0; i < particles.size(); i++)
+                size_t c = (size_t)ofRandom(contacts.size());
+                if (contacts.at(c).manifold.size() > 0)
                 {
-                    size_t c = (size_t)ofRandom(contacts.size());
-                    if (contacts.at(c).manifold.size() > 0)
-                    {
-                        Config out = particles.at(i).robot->GetQ();
-                        out += SampleSphere() * 0.05;
-                        ProjectToManifold(out, contacts.at(c), out);
-                        newParticles.push_back(out);
-                        newWeights.push_back(GetKernelDensity(out));
-                        sum += newWeights.back();
-                    }
-                    else
-                    {
-                        newParticles.push_back(particles.at(i).robot->GetQ());
-                        newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
-                    }
+                    Config out = particles.at(i).robot->GetQ();
+                    out += SampleSphere() * 0.05;
+                    ProjectToManifold(out, contacts.at(c), out);
+                    newParticles.push_back(out);
+                    newWeights.push_back(GetKernelDensity(out));
+                    sum += newWeights.back();
                 }
-
-                for (size_t i = 0; i < particles.size(); i++)
+                else
                 {
-                    particles.at(i).robot->SetQ(newParticles.at(i));
-                    particles.at(i).weight = newWeights.at(i) / sum;
+                    newParticles.push_back(particles.at(i).robot->GetQ());
+                    newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
                 }
-
-                ResampleParticles();
-                break;
             }
-            case (Mode_MPFParticleProjection):
+
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                for (size_t i = 0; i < particles.size(); i++)
-                {
-                    size_t c = (size_t)ofRandom(contacts.size());
-                    if (contacts.at(c).manifold.size() > 0)
-                    {
-                        Config out;
-                        ProjectToManifold(particles.at(i).robot->GetQ(), contacts.at(c), out);
-                        newParticles.push_back(out);
-                        newWeights.push_back(GetKernelDensity(out));
-                        sum += newWeights.back();
-                    }
-                    else
-                    {
-                        newParticles.push_back(particles.at(i).robot->GetQ());
-                        newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
-                    }
-                }
-
-                for (size_t i = 0; i < particles.size(); i++)
-                {
-                    particles.at(i).robot->SetQ(newParticles.at(i));
-                    particles.at(i).weight = newWeights.at(i) / sum;
-                }
-
-                ResampleParticles();
-                break;
+                particles.at(i).robot->SetQ(newParticles.at(i));
+                particles.at(i).weight = newWeights.at(i) / sum;
             }
-            case (Mode_MPFUniformProjection):
+
+            ResampleParticles();
+            break;
+        }
+        case (Mode_MPFParticleProjection):
+        {
+            for (size_t i = 0; i < particles.size(); i++)
             {
-                for (size_t i = 0; i < particles.size(); i++)
+                size_t c = (size_t)ofRandom(contacts.size());
+                if (contacts.at(c).manifold.size() > 0)
                 {
-                    size_t c = (size_t)ofRandom(contacts.size());
-                    if (contacts.at(c).manifold.size() > 0)
-                    {
-                        Config out = SampleSphere() * 6;
-                        ProjectToManifold(out, contacts.at(c), out);
-                        newParticles.push_back(out);
-                        newWeights.push_back(GetKernelDensity(out));
-                        sum += newWeights.back();
-                    }
-                    else
-                    {
-                        newParticles.push_back(particles.at(i).robot->GetQ());
-                        newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
-                    }
+                    Config out;
+                    ProjectToManifold(particles.at(i).robot->GetQ(), contacts.at(c), out);
+                    newParticles.push_back(out);
+                    newWeights.push_back(GetKernelDensity(out));
+                    sum += newWeights.back();
                 }
-
-                for (size_t i = 0; i < particles.size(); i++)
+                else
                 {
-                    particles.at(i).robot->SetQ(newParticles.at(i));
-                    particles.at(i).weight = newWeights.at(i) / sum;
+                    newParticles.push_back(particles.at(i).robot->GetQ());
+                    newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
                 }
-
-                ResampleParticles();
-                break;
             }
+
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                particles.at(i).robot->SetQ(newParticles.at(i));
+                particles.at(i).weight = newWeights.at(i) / sum;
+            }
+
+            ResampleParticles();
+            break;
+        }
+        case (Mode_MPFUniformProjection):
+        {
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                size_t c = (size_t)ofRandom(contacts.size());
+                if (contacts.at(c).manifold.size() > 0)
+                {
+                    Config out = SampleSphere() * 6;
+                    ProjectToManifold(out, contacts.at(c), out);
+                    newParticles.push_back(out);
+                    newWeights.push_back(GetKernelDensity(out));
+                    sum += newWeights.back();
+                }
+                else
+                {
+                    newParticles.push_back(particles.at(i).robot->GetQ());
+                    newWeights.push_back(GetKernelDensity(particles.at(i).robot->GetQ()));
+                }
+            }
+
+            for (size_t i = 0; i < particles.size(); i++)
+            {
+                particles.at(i).robot->SetQ(newParticles.at(i));
+                particles.at(i).weight = newWeights.at(i) / sum;
+            }
+
+            ResampleParticles();
+            break;
+        }
         }
     }
 }
 
-bool AnalyticFilter::ProjectToManifold(const Config& config, Contact& c, Config& out)
+bool AnalyticFilter::ProjectToManifold(const Config &config, Contact &c, Config &out)
 {
     Config q = config;
     out = config;
@@ -380,7 +378,7 @@ void AnalyticFilter::Draw()
 
     for (size_t i = 0; i < points.size(); i++)
     {
-        ofCircle(points.at(i), 1.0f);
+        ofCircle(points.at(i).x, points.at(i).y, 1.0f);
     }
     float pi2 = 2 * 3.14159;
     float scale = 40;
@@ -399,14 +397,13 @@ void AnalyticFilter::Draw()
     for (size_t i = 0; i < contacts.size(); i++)
     {
         ofSetColor(255, 0, 0);
-        ofCircle(contacts.at(i).contactPoint, 3.0f);
+        ofCircle(contacts.at(i).contactPoint.x, contacts.at(i).contactPoint.y, 3.0f);
 
         for (size_t m = 0; m < contacts.at(i).manifold.size(); m++)
         {
             ofSetColor(255, 0, 0);
             ofRect(wrap(contacts.at(i).manifold.at(m)(0) * scale, a, b) - 2, wrap(contacts.at(i).manifold.at(m)(1) * scale, a, b) - 2, 4, 4);
         }
-
     }
 
     for (size_t i = 0; i < particles.size(); i++)
@@ -418,7 +415,6 @@ void AnalyticFilter::Draw()
 
     trueRobot.SetQ(q);
     trueRobot.SetColor(ofColor(0));
-
 
     /*
     for (size_t l = 0; l < 2; l++)
@@ -457,20 +453,24 @@ void AnalyticFilter::ResampleParticles()
         for (size_t k = 0; k < particles.size(); k++)
         {
             currT += particles.at(k).weight;
-            if (currT > t) { j = (int)k; break; }
+            if (currT > t)
+            {
+                j = (int)k;
+                break;
+            }
         }
         particles.at(i).robot->SetQ(offsets.at(j) + SampleSphere() * ballSize);
         t += Minv;
     }
 }
 
-float AnalyticFilter::GetKernelDensity(const Config& q)
+float AnalyticFilter::GetKernelDensity(const Config &q)
 {
     ofVec2f qp(q(0), q(1));
     float density = 0;
-    for(size_t i = 0; i < particles.size(); i++)
+    for (size_t i = 0; i < particles.size(); i++)
     {
-        const Config& qi = particles.at(i).robot->GetQ();
+        const Config &qi = particles.at(i).robot->GetQ();
         ofVec2f pi(qi(0), qi(1));
         density += exp(-27.57 * TorusDist(pi, qp)) / particles.size();
     }
@@ -478,7 +478,7 @@ float AnalyticFilter::GetKernelDensity(const Config& q)
     return density;
 }
 
-void AnalyticFilter::MoveRobot(const Config& movement)
+void AnalyticFilter::MoveRobot(const Config &movement)
 {
 
     float pi = 3.14159;
@@ -521,21 +521,21 @@ void AnalyticFilter::MoveRobot(const Config& movement)
     }
 }
 
-float AnalyticFilter::GetDist(const Config& config, const Contact& contact)
+float AnalyticFilter::GetDist(const Config &config, const Contact &contact)
 {
     ofVec2f fk = FK(contact.link, contact.linkPoint, config);
     return fk.distance(contact.contactPoint);
 }
 
-ofVec2f AnalyticFilter::FK(int link, ofVec2f linkPoint, const Config& config)
+ofVec2f AnalyticFilter::FK(int link, ofVec2f linkPoint, const Config &config)
 {
     Config orig = trueRobot.GetQ();
     trueRobot.SetQ(config);
     trueRobot.Update();
     if (link > 0)
     {
-        const arm_slam::Link* lk = trueRobot.links[link - 1];
-        const arm_slam::Link* nextLink = trueRobot.links[link];
+        const arm_slam::Link *lk = trueRobot.links[link - 1];
+        const arm_slam::Link *nextLink = trueRobot.links[link];
         ofVec2f dir = nextLink->globalTranslation - lk->globalTranslation;
         ofVec2f globalPoint = lk->globalTranslation + dir * linkPoint.x;
         trueRobot.SetQ(orig);
@@ -544,7 +544,7 @@ ofVec2f AnalyticFilter::FK(int link, ofVec2f linkPoint, const Config& config)
     }
     else
     {
-        const arm_slam::Link* nextLink = trueRobot.links[link];
+        const arm_slam::Link *nextLink = trueRobot.links[link];
         ofVec2f dir = nextLink->globalTranslation - trueRobot.root->globalTranslation;
         ofVec2f globalPoint = trueRobot.root->globalTranslation + dir * linkPoint.x;
         trueRobot.SetQ(orig);
@@ -553,11 +553,11 @@ ofVec2f AnalyticFilter::FK(int link, ofVec2f linkPoint, const Config& config)
     }
 }
 
-std::vector<AnalyticFilter::Config> AnalyticFilter::IK(int link, ofVec2f linkPoint, const ofVec2f& target)
+std::vector<AnalyticFilter::Config> AnalyticFilter::IK(int link, ofVec2f linkPoint, const ofVec2f &target)
 {
     float pi2 = 2 * 3.14159;
-    float y =  trueRobot.root->globalTranslation.y - target.y;
-    float x =  target.x - trueRobot.root->globalTranslation.x;
+    float y = trueRobot.root->globalTranslation.y - target.y;
+    float x = target.x - trueRobot.root->globalTranslation.x;
     std::vector<AnalyticFilter::Config> iks;
     if (link == 0)
     {
@@ -577,12 +577,12 @@ std::vector<AnalyticFilter::Config> AnalyticFilter::IK(int link, ofVec2f linkPoi
         float l1 = linkLengths[0];
         float l2 = linkPoint.x * linkLengths[1];
 
-        float YY = 1.0f - pow((x * x + y * y - l1 * l1 - l2 * l2)/ (2 * l1 * l2), 2);
+        float YY = 1.0f - pow((x * x + y * y - l1 * l1 - l2 * l2) / (2 * l1 * l2), 2);
         float Y = sqrt(fmax(YY, 0.0f));
-        float X = (x * x + y * y - l1 * l1 - l2 * l2) / ( 2 * l1 * l2);
+        float X = (x * x + y * y - l1 * l1 - l2 * l2) / (2 * l1 * l2);
 
         {
-            float q2 = atan2(Y , X);
+            float q2 = atan2(Y, X);
             float k1 = l1 + l2 * cos(q2);
             float k2 = l2 * sin(q2);
             float gamma = atan2(k2, k1);
@@ -594,7 +594,7 @@ std::vector<AnalyticFilter::Config> AnalyticFilter::IK(int link, ofVec2f linkPoi
             iks.push_back(c);
         }
         {
-            float q2 = atan2(-Y , X);
+            float q2 = atan2(-Y, X);
             float k1 = l1 + l2 * cos(q2);
             float k2 = l2 * sin(q2);
             float gamma = atan2(k2, k1);
@@ -609,17 +609,16 @@ std::vector<AnalyticFilter::Config> AnalyticFilter::IK(int link, ofVec2f linkPoi
     }
 }
 
-void AnalyticFilter::ComputeManifold(AnalyticFilter::Contact& c)
+void AnalyticFilter::ComputeManifold(AnalyticFilter::Contact &c)
 {
     Config q = trueRobot.GetQ();
     std::vector<Config> iks = IK(c.link, c.linkPoint, c.contactPoint);
-
 
     for (size_t i = 0; i < iks.size(); i++)
     {
         trueRobot.SetQ(iks.at(i));
         trueRobot.Update();
-        //trueRobot.Draw();
+        // trueRobot.Draw();
         c.manifold.push_back(iks.at(i));
     }
     /*
