@@ -8,6 +8,7 @@
 #include "TouchFilter.h"
 #include "Definitions.h"
 #include "ofApp.h"
+#include <nlopt.hpp>
 
 namespace arm_slam
 {
@@ -394,7 +395,10 @@ namespace arm_slam
         ofSetLineWidth(1.0);
         for (size_t i = 0; i < gradMag.size(); i++)
         {
-            ofLine(gradPts[i], gradPts[i] + gradMag[i] * 10);
+            ofVec3f start = ofVec3f(gradPts[i].x, gradPts[i].y, 0.0);
+            ofVec3f end = ofVec3f(gradPts[i].x + gradMag[i].x * 10, gradPts[i].y + gradMag[i].y * 10, 0.0);
+            ofLine(start, end);
+            // ofLine(gradPts[i], gradPts[i] + gradMag[i] * 10);
         }
         gradMag.clear();
         gradPts.clear();
